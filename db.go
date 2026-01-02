@@ -41,6 +41,9 @@ const (
 	// PebbleDBDBBackend represents pebble (uses github.com/cockroachdb/pebble)
 	//   - pure go
 	PebbleDBBackend BackendType = "pebbledb"
+	// TreeDBBackend represents treedb (uses github.com/snissn/gomap/TreeDB)
+	//   - pure go
+	TreeDBBackend BackendType = "treedb"
 )
 
 type dbCreator func(name string, dir string) (DB, error)
