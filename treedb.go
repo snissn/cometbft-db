@@ -27,6 +27,15 @@ const (
 	envMode                = "TREEDB_BENCH_MODE"
 	envPinSnapshot         = "TREEDB_BENCH_PIN_SNAPSHOT"
 	envReuseReads          = "TREEDB_BENCH_REUSE_READS"
+
+	envBGCompactionIntervalMs = "TREEDB_BG_COMPACTION_INTERVAL_MS"
+	envBGCompactionDeadRatio  = "TREEDB_BG_COMPACTION_DEAD_RATIO"
+	envBGCompactionMinBytes   = "TREEDB_BG_COMPACTION_MIN_BYTES"
+	envBGVacuumIntervalMs     = "TREEDB_BG_VACUUM_INTERVAL_MS"
+	envBGVacuumSpanRatioPPM   = "TREEDB_BG_VACUUM_SPAN_RATIO_PPM"
+	envKeepRecent             = "TREEDB_KEEP_RECENT"
+	envChunkSizeBytes         = "TREEDB_CHUNK_SIZE_BYTES"
+	envFlushThresholdBytes    = "TREEDB_FLUSH_THRESHOLD_BYTES"
 )
 
 func init() {
@@ -98,6 +107,38 @@ func envInt64(name string, defaultValue int64) int64 {
 	return n
 }
 
+func envUint64(name string, defaultValue uint64) uint64 {
+	v, ok := os.LookupEnv(name)
+	if !ok {
+		return defaultValue
+	}
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return defaultValue
+	}
+	n, err := strconv.ParseUint(v, 10, 64)
+	if err != nil {
+		return defaultValue
+	}
+	return n
+}
+
+func envFloat64(name string, defaultValue float64) float64 {
+	v, ok := os.LookupEnv(name)
+	if !ok {
+		return defaultValue
+	}
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return defaultValue
+	}
+	n, err := strconv.ParseFloat(v, 64)
+	if err != nil {
+		return defaultValue
+	}
+	return n
+}
+
 func envString(name string, defaultValue string) string {
 	v, ok := os.LookupEnv(name)
 	if !ok {
@@ -144,6 +185,15 @@ func NewTreeDBAdapter(dir string, name string) (*TreeDB, error) {
 		allowUnsafe = true
 	}
 
+	flushThreshold := envInt64(envFlushThresholdBytes, 64*1024*1024)
+	chunkSize := envInt64(envChunkSizeBytes, 64*1024*1024)
+	keepRecent := envUint64(envKeepRecent, 1)
+	bgVacuumIntervalMs := envInt64(envBGVacuumIntervalMs, 15*1000)
+	bgVacuumSpanRatioPPM := envUint64(envBGVacuumSpanRatioPPM, 0)
+	bgCompactionIntervalMs := envInt64(envBGCompactionIntervalMs, 0)
+	bgCompactionDeadRatio := envFloat64(envBGCompactionDeadRatio, 0)
+	bgCompactionMinBytes := envUint64(envBGCompactionMinBytes, 0)
+
 	mode := treedb.ModeCached
 	switch strings.ToLower(envString(envMode, "cached")) {
 	case "backend", "raw", "uncached":
@@ -162,13 +212,25 @@ func NewTreeDBAdapter(dir string, name string) (*TreeDB, error) {
 		DisableReadChecksum: disableReadChecksum,
 
 		// --- Tuning for High-Throughput & Large Values ---
-		FlushThreshold:        64 * 1024 * 1024,
+		FlushThreshold:        flushThreshold,
 		FlushBuildConcurrency: 4,
-		ChunkSize:             64 * 1024 * 1024,
+		ChunkSize:             chunkSize,
 
 		PreferAppendAlloc:             false,
-		KeepRecent:                    1,
-		BackgroundIndexVacuumInterval: 15 * time.Second,
+		KeepRecent:                    keepRecent,
+		BackgroundIndexVacuumInterval: time.Duration(bgVacuumIntervalMs) * time.Millisecond,
+	}
+	if bgVacuumSpanRatioPPM > 0 {
+		openOpts.BackgroundIndexVacuumSpanRatioPPM = uint32(bgVacuumSpanRatioPPM)
+	}
+	if bgCompactionIntervalMs > 0 {
+		openOpts.BackgroundCompactionInterval = time.Duration(bgCompactionIntervalMs) * time.Millisecond
+	}
+	if bgCompactionDeadRatio > 0 {
+		openOpts.BackgroundCompactionDeadRatio = bgCompactionDeadRatio
+	}
+	if bgCompactionMinBytes > 0 {
+		openOpts.BackgroundCompactionMinBytes = bgCompactionMinBytes
 	}
 	setAllowUnsafe(&openOpts, allowUnsafe)
 
@@ -176,6 +238,7 @@ func NewTreeDBAdapter(dir string, name string) (*TreeDB, error) {
 		// Background tasks can dominate profile lock/wait time and obscure the
 		// hot path; disable them for tighter profiling loops.
 		openOpts.BackgroundIndexVacuumInterval = -1
+		openOpts.BackgroundCompactionInterval = -1
 		openOpts.BackgroundCheckpointInterval = -1
 		openOpts.MaxWALBytes = -1
 		openOpts.BackgroundCheckpointIdleDuration = -1
