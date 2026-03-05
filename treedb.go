@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 
 	treedb "github.com/snissn/gomap/TreeDB"
 	"github.com/snissn/gomap/TreeDB/tree"
@@ -20,14 +22,20 @@ func init() {
 
 // TreeDB is a TreeDB backend.
 type TreeDB struct {
-	db         *treedb.DB
-	kv         *treedbadapter.DB
-	snap       *treedb.Snapshot
-	reuseReads bool
-	readBuf    []byte
+	db                     *treedb.DB
+	kv                     *treedbadapter.DB
+	snap                   treedb.Snapshot
+	reuseReads             bool
+	readBuf                []byte
+	forceCheckpointOnWrite bool
 }
 
 var _ DB = (*TreeDB)(nil)
+
+const envTreeDBForceCheckpointOnWrite = "TREEDB_FORCE_CHECKPOINT_ON_WRITE"
+const envTreeDBOpenProfile = "TREEDB_OPEN_PROFILE"
+const envTreeDBAllowNonRouteMode = "TREEDB_ALLOW_NON_ROUTE_MODE"
+const envTreeDBRequiredOuterLeafMode = "TREEDB_REQUIRED_OUTER_LEAF_MODE"
 
 func (d *TreeDB) PinSnapshot() {
 	if d.snap != nil {
@@ -43,6 +51,44 @@ func (d *TreeDB) UnpinSnapshot() {
 	}
 }
 
+func forceCheckpointOnWriteFromEnv() bool {
+	raw, ok := os.LookupEnv(envTreeDBForceCheckpointOnWrite)
+	if !ok {
+		return false
+	}
+	on, err := strconv.ParseBool(raw)
+	if err != nil {
+		return false
+	}
+	return on
+}
+
+func treeDBProfileFromEnv() treedb.Profile {
+	raw, ok := os.LookupEnv(envTreeDBOpenProfile)
+	if !ok {
+		return treedb.ProfileWALOnFast
+	}
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "fast":
+		return treedb.ProfileFast
+	case "wal_on_fast", "walonfast":
+		return treedb.ProfileWALOnFast
+	case "durable":
+		return treedb.ProfileDurable
+	case "bench":
+		return treedb.ProfileBench
+	default:
+		return treedb.ProfileWALOnFast
+	}
+}
+
+func (d *TreeDB) maybeCheckpointAfterWrite() error {
+	if d == nil || !d.forceCheckpointOnWrite || d.kv == nil {
+		return nil
+	}
+	return d.kv.Checkpoint()
+}
+
 func NewTreeDB(name, dir string) (*TreeDB, error) {
 	return NewTreeDBAdapter(dir, name)
 }
@@ -53,15 +99,29 @@ func NewTreeDBAdapter(dir string, name string) (*TreeDB, error) {
 		return nil, fmt.Errorf("error creating treedb directory: %w", err)
 	}
 
-	tdb, err := treedb.Open(treedb.OptionsFor(treedb.ProfileFast, dbPath))
+	profile := treeDBProfileFromEnv()
+	openOpts := treedb.OptionsFor(profile, dbPath)
+	// Preserve enough recent versions for consumers that rely on versioned
+	// snapshots during restore/state-sync flows.
+	openOpts.KeepRecent = 1
+	// Force v1 mode for Celestia validation runs.
+	// Keep restore path deterministic while we validate version semantics.
+	//openOpts.DisableBackgroundPrune = true
+	//openOpts.BackgroundValueLogGCInterval = -1
+	//openOpts.BackgroundValueLogRewriteInterval = -1
+
+	// Keep ForcePointers/pointer thresholds from the selected profile.
+
+	tdb, err := treedb.Open(openOpts)
 	if err != nil {
 		return nil, err
 	}
 
 	adapter := &TreeDB{
-		db:         tdb,
-		kv:         treedbadapter.Wrap(tdb),
-		reuseReads: false,
+		db:                     tdb,
+		kv:                     treedbadapter.Wrap(tdb),
+		reuseReads:             false,
+		forceCheckpointOnWrite: forceCheckpointOnWriteFromEnv(),
 	}
 	return adapter, nil
 }
@@ -123,7 +183,10 @@ func (d *TreeDB) Set(key, value []byte) error {
 	if d.kv == nil {
 		return treedb.ErrClosed
 	}
-	return d.kv.Set(key, value)
+	if err := d.kv.Set(key, value); err != nil {
+		return err
+	}
+	return d.maybeCheckpointAfterWrite()
 }
 
 // SetSync implements DB.
@@ -137,7 +200,10 @@ func (d *TreeDB) SetSync(key, value []byte) error {
 	if d.kv == nil {
 		return treedb.ErrClosed
 	}
-	return d.kv.SetSync(key, value)
+	if err := d.kv.SetSync(key, value); err != nil {
+		return err
+	}
+	return d.maybeCheckpointAfterWrite()
 }
 
 // Delete implements DB.
@@ -148,7 +214,10 @@ func (d *TreeDB) Delete(key []byte) error {
 	if d.kv == nil {
 		return treedb.ErrClosed
 	}
-	return d.kv.Delete(key)
+	if err := d.kv.Delete(key); err != nil {
+		return err
+	}
+	return d.maybeCheckpointAfterWrite()
 }
 
 // DeleteSync implements DB.
@@ -159,7 +228,10 @@ func (d *TreeDB) DeleteSync(key []byte) error {
 	if d.kv == nil {
 		return treedb.ErrClosed
 	}
-	return d.kv.DeleteSync(key)
+	if err := d.kv.DeleteSync(key); err != nil {
+		return err
+	}
+	return d.maybeCheckpointAfterWrite()
 }
 
 // Iterator implements DB.
@@ -211,12 +283,6 @@ func (d *TreeDB) NewBatch() Batch {
 		kb, err := d.kv.NewBatch()
 		if err == nil {
 			b.kb = kb
-			if sv, ok := kb.(interface{ SetView(key, value []byte) error }); ok {
-				b.setView = sv.SetView
-			}
-			if dv, ok := kb.(interface{ DeleteView(key []byte) error }); ok {
-				b.deleteView = dv.DeleteView
-			}
 		}
 	}
 	return b
