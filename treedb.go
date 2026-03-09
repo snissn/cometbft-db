@@ -24,7 +24,6 @@ func init() {
 type TreeDB struct {
 	db                     *treedb.DB
 	kv                     *treedbadapter.DB
-	snap                   treedb.Snapshot
 	reuseReads             bool
 	readBuf                []byte
 	forceCheckpointOnWrite bool
@@ -36,20 +35,6 @@ const envTreeDBForceCheckpointOnWrite = "TREEDB_FORCE_CHECKPOINT_ON_WRITE"
 const envTreeDBOpenProfile = "TREEDB_OPEN_PROFILE"
 const envTreeDBAllowNonRouteMode = "TREEDB_ALLOW_NON_ROUTE_MODE"
 const envTreeDBRequiredOuterLeafMode = "TREEDB_REQUIRED_OUTER_LEAF_MODE"
-
-func (d *TreeDB) PinSnapshot() {
-	if d.snap != nil {
-		d.snap.Close()
-	}
-	d.snap = d.db.AcquireSnapshot()
-}
-
-func (d *TreeDB) UnpinSnapshot() {
-	if d.snap != nil {
-		d.snap.Close()
-		d.snap = nil
-	}
-}
 
 func forceCheckpointOnWriteFromEnv() bool {
 	raw, ok := os.LookupEnv(envTreeDBForceCheckpointOnWrite)
@@ -131,16 +116,6 @@ func (d *TreeDB) Get(key []byte) ([]byte, error) {
 	if len(key) == 0 {
 		return nil, errKeyEmpty
 	}
-	if d.snap != nil {
-		val, err := d.snap.GetUnsafe(key)
-		if err != nil {
-			if errors.Is(err, tree.ErrKeyNotFound) {
-				return nil, nil
-			}
-			return nil, err
-		}
-		return val, nil
-	}
 	if d.db == nil {
 		return nil, treedb.ErrClosed
 	}
@@ -162,9 +137,6 @@ func (d *TreeDB) Get(key []byte) ([]byte, error) {
 func (d *TreeDB) Has(key []byte) (bool, error) {
 	if len(key) == 0 {
 		return false, errKeyEmpty
-	}
-	if d.snap != nil {
-		return d.snap.Has(key)
 	}
 	if d.kv == nil {
 		return false, treedb.ErrClosed
@@ -269,7 +241,6 @@ func (d *TreeDB) Close() error {
 	if d.db == nil {
 		return nil
 	}
-	d.UnpinSnapshot()
 	err := d.db.Close()
 	d.db = nil
 	d.kv = nil
