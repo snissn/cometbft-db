@@ -10,6 +10,14 @@ type coreBatch struct {
 
 var _ Batch = (*coreBatch)(nil)
 
+type batchSetViewer interface {
+	SetView(key, value []byte) error
+}
+
+type batchDeleteViewer interface {
+	DeleteView(key []byte) error
+}
+
 // Set implements Batch.
 func (b *coreBatch) Set(key, value []byte) error {
 	if len(key) == 0 {
@@ -24,6 +32,25 @@ func (b *coreBatch) Set(key, value []byte) error {
 	return b.kb.Set(key, value)
 }
 
+// SetView records a Put without forcing another key/value copy when the
+// underlying kv batch supports view semantics. Callers must keep key/value
+// immutable until Write/WriteSync/Close.
+func (b *coreBatch) SetView(key, value []byte) error {
+	if len(key) == 0 {
+		return errKeyEmpty
+	}
+	if value == nil {
+		return errValueNil
+	}
+	if b.done || b.kb == nil {
+		return errBatchClosed
+	}
+	if sv, ok := b.kb.(batchSetViewer); ok {
+		return sv.SetView(key, value)
+	}
+	return b.kb.Set(key, value)
+}
+
 // Delete implements Batch.
 func (b *coreBatch) Delete(key []byte) error {
 	if len(key) == 0 {
@@ -31,6 +58,22 @@ func (b *coreBatch) Delete(key []byte) error {
 	}
 	if b.done || b.kb == nil {
 		return errBatchClosed
+	}
+	return b.kb.Delete(key)
+}
+
+// DeleteView records a Delete without forcing another key copy when the
+// underlying kv batch supports view semantics. Callers must keep key immutable
+// until Write/WriteSync/Close.
+func (b *coreBatch) DeleteView(key []byte) error {
+	if len(key) == 0 {
+		return errKeyEmpty
+	}
+	if b.done || b.kb == nil {
+		return errBatchClosed
+	}
+	if dv, ok := b.kb.(batchDeleteViewer); ok {
+		return dv.DeleteView(key)
 	}
 	return b.kb.Delete(key)
 }

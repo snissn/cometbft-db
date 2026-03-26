@@ -158,6 +158,35 @@ func (d *TreeDB) Get(key []byte) ([]byte, error) {
 	return d.kv.GetUnsafe(key)
 }
 
+// GetAppend fetches the value of the given key into dst when supported.
+// Missing keys return (nil, nil) to match DB.Get semantics.
+func (d *TreeDB) GetAppend(key, dst []byte) ([]byte, error) {
+	if len(key) == 0 {
+		return nil, errKeyEmpty
+	}
+	if d.snap != nil {
+		val, err := d.snap.GetAppend(key, dst)
+		if err != nil {
+			if errors.Is(err, tree.ErrKeyNotFound) {
+				return nil, nil
+			}
+			return nil, err
+		}
+		return val, nil
+	}
+	if d.db == nil {
+		return nil, treedb.ErrClosed
+	}
+	val, err := d.db.GetAppend(key, dst)
+	if err != nil {
+		if errors.Is(err, tree.ErrKeyNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return val, nil
+}
+
 // Has implements DB.
 func (d *TreeDB) Has(key []byte) (bool, error) {
 	if len(key) == 0 {
