@@ -8,7 +8,7 @@ require (
 	github.com/google/btree v1.1.3
 	github.com/jmhodges/levigo v1.0.0
 	github.com/linxGnu/grocksdb v1.9.8
-	github.com/snissn/gomap v0.5.1-0.20260419181837-e3f3476e40de
+	github.com/snissn/gomap v0.5.1-0.20260419185541-7698ac3c0fb5
 	github.com/stretchr/testify v1.11.1
 	github.com/syndtr/goleveldb v1.0.1-0.20210819022825-2ae1ddf74ef7
 	go.etcd.io/bbolt v1.4.3

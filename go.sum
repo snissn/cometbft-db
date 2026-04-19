@@ -111,6 +111,8 @@ github.com/snissn/compress v1.18.2-snissn.0.0.20260204222835-33fc0851d88e h1:l7j
 github.com/snissn/compress v1.18.2-snissn.0.0.20260204222835-33fc0851d88e/go.mod h1:p4xiZN07JMUF5xuybNGkG+pozT12MAblxCx36z+PIYM=
 github.com/snissn/gomap v0.5.1-0.20260419181837-e3f3476e40de h1:xNN9h1PTedfheYHuMdA6PBfjDAkb1HexUAiT4+e9N2g=
 github.com/snissn/gomap v0.5.1-0.20260419181837-e3f3476e40de/go.mod h1:/ubhTjNTJNeWVCBHvzafnsE3hXEdPsrPRzhIueAP7EU=
+github.com/snissn/gomap v0.5.1-0.20260419185541-7698ac3c0fb5 h1:YgA8+nswc7ayiIipwydosLNll+gpnVGGiUE313PY/b8=
+github.com/snissn/gomap v0.5.1-0.20260419185541-7698ac3c0fb5/go.mod h1:/ubhTjNTJNeWVCBHvzafnsE3hXEdPsrPRzhIueAP7EU=
 github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu7U=
 github.com/stretchr/testify v1.11.1/go.mod h1:wZwfW3scLgRK+23gO65QZefKpKQRnfz6sD981Nm4B6U=
 github.com/syndtr/goleveldb v1.0.1-0.20210819022825-2ae1ddf74ef7 h1:epCh84lMvA70Z7CTTCmYQn2CKbY8j86K7/FAIr141uY=
