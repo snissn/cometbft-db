@@ -3,8 +3,6 @@ package db
 import (
 	"errors"
 	"fmt"
-	"os"
-	"strconv"
 
 	treedb "github.com/snissn/gomap/TreeDB"
 	treedbkv "github.com/snissn/gomap/TreeDB/integration/kvstoreadapter"
@@ -21,17 +19,15 @@ func init() {
 
 // TreeDB is a TreeDB backend.
 type TreeDB struct {
-	db                     *treedb.DB
-	kv                     *treedbadapter.DB
-	snap                   treedb.Snapshot
-	reuseReads             bool
-	readBuf                []byte
-	forceCheckpointOnWrite bool
+	db         *treedb.DB
+	kv         *treedbadapter.DB
+	snap       treedb.Snapshot
+	reuseReads bool
+	readBuf    []byte
 }
 
 var _ DB = (*TreeDB)(nil)
 
-const envTreeDBForceCheckpointOnWrite = "TREEDB_FORCE_CHECKPOINT_ON_WRITE"
 const envTreeDBOpenProfile = treedbkv.EnvOpenProfile
 
 func (d *TreeDB) PinSnapshot() {
@@ -46,25 +42,6 @@ func (d *TreeDB) UnpinSnapshot() {
 		d.snap.Close()
 		d.snap = nil
 	}
-}
-
-func forceCheckpointOnWriteFromEnv() bool {
-	raw, ok := os.LookupEnv(envTreeDBForceCheckpointOnWrite)
-	if !ok {
-		return false
-	}
-	on, err := strconv.ParseBool(raw)
-	if err != nil {
-		return false
-	}
-	return on
-}
-
-func (d *TreeDB) maybeCheckpointAfterWrite() error {
-	if d == nil || !d.forceCheckpointOnWrite || d.kv == nil {
-		return nil
-	}
-	return d.kv.Checkpoint()
 }
 
 func NewTreeDB(name, dir string) (*TreeDB, error) {
@@ -85,10 +62,9 @@ func NewTreeDBAdapter(dir string, name string) (*TreeDB, error) {
 	}
 
 	adapter := &TreeDB{
-		db:                     opened.DB,
-		kv:                     opened.KV,
-		reuseReads:             false,
-		forceCheckpointOnWrite: forceCheckpointOnWriteFromEnv(),
+		db:         opened.DB,
+		kv:         opened.KV,
+		reuseReads: false,
 	}
 	return adapter, nil
 }
@@ -182,7 +158,7 @@ func (d *TreeDB) Set(key, value []byte) error {
 	if err := d.kv.Set(key, value); err != nil {
 		return err
 	}
-	return d.maybeCheckpointAfterWrite()
+	return nil
 }
 
 // SetSync implements DB.
@@ -199,7 +175,7 @@ func (d *TreeDB) SetSync(key, value []byte) error {
 	if err := d.kv.SetSync(key, value); err != nil {
 		return err
 	}
-	return d.maybeCheckpointAfterWrite()
+	return nil
 }
 
 // Delete implements DB.
@@ -213,7 +189,7 @@ func (d *TreeDB) Delete(key []byte) error {
 	if err := d.kv.Delete(key); err != nil {
 		return err
 	}
-	return d.maybeCheckpointAfterWrite()
+	return nil
 }
 
 // DeleteSync implements DB.
@@ -227,7 +203,7 @@ func (d *TreeDB) DeleteSync(key []byte) error {
 	if err := d.kv.DeleteSync(key); err != nil {
 		return err
 	}
-	return d.maybeCheckpointAfterWrite()
+	return nil
 }
 
 // Iterator implements DB.
