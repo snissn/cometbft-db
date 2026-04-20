@@ -95,9 +95,6 @@ func (b *coreBatch) Write() error {
 		return err
 	}
 	b.done = true
-	if b.db != nil {
-		return b.db.maybeCheckpointAfterWrite()
-	}
 	return nil
 }
 
@@ -110,9 +107,6 @@ func (b *coreBatch) WriteSync() error {
 		return err
 	}
 	b.done = true
-	if b.db != nil {
-		return b.db.maybeCheckpointAfterWrite()
-	}
 	return nil
 }
 
