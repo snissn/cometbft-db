@@ -14,6 +14,10 @@ type PrefixDB struct {
 
 var _ DB = (*PrefixDB)(nil)
 
+type appendGetter interface {
+	GetAppend(key, dst []byte) ([]byte, error)
+}
+
 // NewPrefixDB lets you namespace multiple DBs within a single DB.
 func NewPrefixDB(db DB, prefix []byte) *PrefixDB {
 	return &PrefixDB{
@@ -36,6 +40,28 @@ func (pdb *PrefixDB) Get(key []byte) ([]byte, error) {
 		return nil, err
 	}
 	return value, nil
+}
+
+// GetAppend fetches the value of the given key into dst when the underlying
+// DB supports append-style reads. Missing keys return (nil, nil).
+func (pdb *PrefixDB) GetAppend(key, dst []byte) ([]byte, error) {
+	if len(key) == 0 {
+		return nil, errKeyEmpty
+	}
+	pdb.mtx.Lock()
+	defer pdb.mtx.Unlock()
+
+	pkey := pdb.prefixed(key)
+	if getter, ok := pdb.db.(appendGetter); ok {
+		return getter.GetAppend(pkey, dst)
+	}
+
+	value, err := pdb.db.Get(pkey)
+	if err != nil || value == nil {
+		return nil, err
+	}
+	dst = append(dst[:0], value...)
+	return dst, nil
 }
 
 // Has implements DB.
