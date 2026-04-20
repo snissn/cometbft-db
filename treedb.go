@@ -33,8 +33,6 @@ var _ DB = (*TreeDB)(nil)
 
 const envTreeDBForceCheckpointOnWrite = "TREEDB_FORCE_CHECKPOINT_ON_WRITE"
 const envTreeDBOpenProfile = treedbkv.EnvOpenProfile
-const envTreeDBAllowNonRouteMode = "TREEDB_ALLOW_NON_ROUTE_MODE"
-const envTreeDBRequiredOuterLeafMode = "TREEDB_REQUIRED_OUTER_LEAF_MODE"
 
 func (d *TreeDB) PinSnapshot() {
 	if d.snap != nil {
@@ -276,14 +274,14 @@ func (d *TreeDB) Close() error {
 
 // NewBatch implements DB.
 func (d *TreeDB) NewBatch() Batch {
-	b := &coreBatch{db: d}
-	if d.kv != nil {
-		kb, err := d.kv.NewBatch()
-		if err == nil {
-			b.kb = kb
-		}
+	if d.kv == nil {
+		return &coreBatch{db: d, err: treedb.ErrClosed}
 	}
-	return b
+	kb, err := d.kv.NewBatch()
+	if err != nil {
+		return &coreBatch{db: d, err: err}
+	}
+	return &coreBatch{db: d, kb: kb}
 }
 
 // Print implements DB.

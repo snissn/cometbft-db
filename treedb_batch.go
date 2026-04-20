@@ -6,6 +6,7 @@ type coreBatch struct {
 	db   *TreeDB
 	kb   kvstore.Batch
 	done bool
+	err  error
 }
 
 var _ Batch = (*coreBatch)(nil)
@@ -18,6 +19,13 @@ type batchDeleteViewer interface {
 	DeleteView(key []byte) error
 }
 
+func (b *coreBatch) batchErr() error {
+	if b != nil && b.err != nil {
+		return b.err
+	}
+	return errBatchClosed
+}
+
 // Set implements Batch.
 func (b *coreBatch) Set(key, value []byte) error {
 	if len(key) == 0 {
@@ -27,7 +35,7 @@ func (b *coreBatch) Set(key, value []byte) error {
 		return errValueNil
 	}
 	if b.done || b.kb == nil {
-		return errBatchClosed
+		return b.batchErr()
 	}
 	return b.kb.Set(key, value)
 }
@@ -43,7 +51,7 @@ func (b *coreBatch) SetView(key, value []byte) error {
 		return errValueNil
 	}
 	if b.done || b.kb == nil {
-		return errBatchClosed
+		return b.batchErr()
 	}
 	if sv, ok := b.kb.(batchSetViewer); ok {
 		return sv.SetView(key, value)
@@ -57,7 +65,7 @@ func (b *coreBatch) Delete(key []byte) error {
 		return errKeyEmpty
 	}
 	if b.done || b.kb == nil {
-		return errBatchClosed
+		return b.batchErr()
 	}
 	return b.kb.Delete(key)
 }
@@ -70,7 +78,7 @@ func (b *coreBatch) DeleteView(key []byte) error {
 		return errKeyEmpty
 	}
 	if b.done || b.kb == nil {
-		return errBatchClosed
+		return b.batchErr()
 	}
 	if dv, ok := b.kb.(batchDeleteViewer); ok {
 		return dv.DeleteView(key)
@@ -81,12 +89,12 @@ func (b *coreBatch) DeleteView(key []byte) error {
 // Write implements Batch.
 func (b *coreBatch) Write() error {
 	if b.done || b.kb == nil {
-		return errBatchClosed
+		return b.batchErr()
 	}
-	b.done = true
 	if err := b.kb.Commit(); err != nil {
 		return err
 	}
+	b.done = true
 	if b.db != nil {
 		return b.db.maybeCheckpointAfterWrite()
 	}
@@ -96,12 +104,12 @@ func (b *coreBatch) Write() error {
 // WriteSync implements Batch.
 func (b *coreBatch) WriteSync() error {
 	if b.done || b.kb == nil {
-		return errBatchClosed
+		return b.batchErr()
 	}
-	b.done = true
 	if err := b.kb.CommitSync(); err != nil {
 		return err
 	}
+	b.done = true
 	if b.db != nil {
 		return b.db.maybeCheckpointAfterWrite()
 	}
@@ -112,14 +120,10 @@ func (b *coreBatch) WriteSync() error {
 func (b *coreBatch) Close() error {
 	if b.kb == nil {
 		b.done = true
-		return nil
+		return b.err
 	}
-	alreadyDone := b.done
 	err := b.kb.Close()
 	b.kb = nil
 	b.done = true
-	if alreadyDone {
-		return nil
-	}
 	return err
 }
