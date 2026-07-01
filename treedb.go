@@ -53,7 +53,7 @@ func NewTreeDBAdapter(dir string, name string) (*TreeDB, error) {
 		ParentDir:         dir,
 		Name:              name,
 		AdapterName:       "TreeDB",
-		DefaultProfile:    treedb.ProfileWALOnFast,
+		DefaultProfile:    treedb.ProfileCommandWALDurable,
 		DefaultKeepRecent: 1,
 		ProfileEnvKey:     envTreeDBOpenProfile,
 	})
