@@ -37,6 +37,9 @@ func (b *coreBatch) Set(key, value []byte) error {
 	if b.done || b.kb == nil {
 		return b.batchErr()
 	}
+	if sv, ok := b.kb.(batchSetViewer); ok {
+		return sv.SetView(key, value)
+	}
 	return b.kb.Set(key, value)
 }
 
