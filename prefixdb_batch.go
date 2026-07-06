@@ -31,6 +31,9 @@ func (pb prefixDBBatch) Set(key, value []byte) error {
 		return errValueNil
 	}
 	pkey := append(cp(pb.prefix), key...)
+	if sv, ok := pb.source.(prefixBatchSetViewer); ok {
+		return sv.SetView(pkey, value)
+	}
 	return pb.source.Set(pkey, value)
 }
 

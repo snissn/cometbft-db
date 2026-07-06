@@ -40,6 +40,53 @@ func (s *stubKVBatchNoView) Close() error          { return nil }
 
 var _ kvstore.Batch = (*stubKVBatchNoView)(nil)
 
+func TestCoreBatchSetUsesUnderlyingView(t *testing.T) {
+	stub := &stubKVBatchWithView{}
+	b := &coreBatch{kb: stub}
+	if err := b.Set([]byte("k"), []byte("v")); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	if stub.setViewCalls != 1 || stub.setCalls != 0 {
+		t.Fatalf("set calls=%d setView calls=%d want 0/1", stub.setCalls, stub.setViewCalls)
+	}
+}
+
+func TestCoreBatchSetFallsBackWithoutUnderlyingView(t *testing.T) {
+	stub := &stubKVBatchNoView{}
+	b := &coreBatch{kb: stub}
+	if err := b.Set([]byte("k"), []byte("v")); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	if stub.setCalls != 1 {
+		t.Fatalf("set calls=%d want 1", stub.setCalls)
+	}
+}
+
+func TestCoreBatchSetValidationBeforeViewDispatch(t *testing.T) {
+	stub := &stubKVBatchWithView{}
+	b := &coreBatch{kb: stub}
+	if err := b.Set(nil, []byte("v")); !errors.Is(err, errKeyEmpty) {
+		t.Fatalf("Set nil key err=%v want %v", err, errKeyEmpty)
+	}
+	if err := b.Set([]byte("k"), nil); !errors.Is(err, errValueNil) {
+		t.Fatalf("Set nil value err=%v want %v", err, errValueNil)
+	}
+	if stub.setViewCalls != 0 || stub.setCalls != 0 {
+		t.Fatalf("set calls=%d setView calls=%d want 0/0", stub.setCalls, stub.setViewCalls)
+	}
+}
+
+func TestCoreBatchSetClosedBeforeViewDispatch(t *testing.T) {
+	stub := &stubKVBatchWithView{}
+	b := &coreBatch{kb: stub, done: true}
+	if err := b.Set([]byte("k"), []byte("v")); !errors.Is(err, errBatchClosed) {
+		t.Fatalf("Set closed err=%v want %v", err, errBatchClosed)
+	}
+	if stub.setViewCalls != 0 || stub.setCalls != 0 {
+		t.Fatalf("set calls=%d setView calls=%d want 0/0", stub.setCalls, stub.setViewCalls)
+	}
+}
+
 func TestCoreBatchSetViewUsesUnderlyingView(t *testing.T) {
 	stub := &stubKVBatchWithView{}
 	b := &coreBatch{kb: stub}
@@ -96,17 +143,66 @@ type stubPrefixBatchWithView struct {
 	setViewCalls    int
 	deleteCalls     int
 	deleteViewCalls int
+	setKeys         [][]byte
+	setViewKeys     [][]byte
 }
 
-func (s *stubPrefixBatchWithView) Set(_, _ []byte) error     { s.setCalls++; return nil }
-func (s *stubPrefixBatchWithView) Delete(_ []byte) error     { s.deleteCalls++; return nil }
-func (s *stubPrefixBatchWithView) Write() error              { return nil }
-func (s *stubPrefixBatchWithView) WriteSync() error          { return nil }
-func (s *stubPrefixBatchWithView) Close() error              { return nil }
-func (s *stubPrefixBatchWithView) SetView(_, _ []byte) error { s.setViewCalls++; return nil }
+func (s *stubPrefixBatchWithView) Set(key, _ []byte) error {
+	s.setCalls++
+	s.setKeys = append(s.setKeys, key)
+	return nil
+}
+func (s *stubPrefixBatchWithView) Delete(_ []byte) error { s.deleteCalls++; return nil }
+func (s *stubPrefixBatchWithView) Write() error          { return nil }
+func (s *stubPrefixBatchWithView) WriteSync() error      { return nil }
+func (s *stubPrefixBatchWithView) Close() error          { return nil }
+func (s *stubPrefixBatchWithView) SetView(key, _ []byte) error {
+	s.setViewCalls++
+	s.setViewKeys = append(s.setViewKeys, key)
+	return nil
+}
 func (s *stubPrefixBatchWithView) DeleteView(_ []byte) error { s.deleteViewCalls++; return nil }
 
 var _ Batch = (*stubPrefixBatchWithView)(nil)
+
+func TestPrefixBatchSetUsesUnderlyingViewWithStablePrefixedKey(t *testing.T) {
+	stub := &stubPrefixBatchWithView{}
+	prefix := []byte("p/")
+	key := []byte("key")
+	pb := newPrefixBatch(prefix, stub)
+	if err := pb.Set(key, []byte("value")); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	prefix[0] = 'x'
+	key[0] = 'K'
+	if stub.setViewCalls != 1 || stub.setCalls != 0 {
+		t.Fatalf("set calls=%d setView calls=%d want 0/1", stub.setCalls, stub.setViewCalls)
+	}
+	if got := string(stub.setViewKeys[0]); got != "p/key" {
+		t.Fatalf("SetView key=%q want %q", got, "p/key")
+	}
+}
+
+type stubPrefixBatchNoView struct {
+	setCalls int
+}
+
+func (s *stubPrefixBatchNoView) Set(_, _ []byte) error { s.setCalls++; return nil }
+func (s *stubPrefixBatchNoView) Delete(_ []byte) error { return nil }
+func (s *stubPrefixBatchNoView) Write() error          { return nil }
+func (s *stubPrefixBatchNoView) WriteSync() error      { return nil }
+func (s *stubPrefixBatchNoView) Close() error          { return nil }
+
+func TestPrefixBatchSetFallsBackWithoutUnderlyingView(t *testing.T) {
+	stub := &stubPrefixBatchNoView{}
+	pb := newPrefixBatch([]byte("p/"), stub)
+	if err := pb.Set([]byte("k"), []byte("v")); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	if stub.setCalls != 1 {
+		t.Fatalf("set calls=%d want 1", stub.setCalls)
+	}
+}
 
 type stubPrefixBatchSetViewErr struct{}
 
@@ -118,6 +214,13 @@ func (s *stubPrefixBatchSetViewErr) Close() error              { return nil }
 func (s *stubPrefixBatchSetViewErr) SetView(_, _ []byte) error { return errors.New("set-view-failed") }
 func (s *stubPrefixBatchSetViewErr) DeleteView(_ []byte) error {
 	return errors.New("delete-view-failed")
+}
+
+func TestPrefixBatchSetPropagatesViewErrors(t *testing.T) {
+	pb := newPrefixBatch([]byte("p/"), &stubPrefixBatchSetViewErr{})
+	if err := pb.Set([]byte("k"), []byte("v")); err == nil || err.Error() != "set-view-failed" {
+		t.Fatalf("Set err=%v want set-view-failed", err)
+	}
 }
 
 func TestPrefixBatchSetViewPropagatesErrors(t *testing.T) {
